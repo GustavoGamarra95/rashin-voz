@@ -21,7 +21,7 @@ ryoku plugin add ~/Documentos/ryoku-plugins/rashin-voz --bar --yes
 Atajo opcional, en `~/.config/hypr/user.lua`:
 
 ```lua
-hl.bind("SUPER + ALT + R", hl.dsp.exec_cmd("rashin-voz toggle"))
+hl.bind("SUPER + ALT + S", hl.dsp.exec_cmd("rashin-voz toggle"))
 ```
 
 ## Uso
