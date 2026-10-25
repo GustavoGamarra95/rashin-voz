@@ -10,7 +10,9 @@ Item {
     readonly property var settings: pluginApi ? pluginApi.pluginSettings : null
     readonly property bool speakReplies: settings ? (settings.speakReplies ?? true) : true
     readonly property string language: settings ? (settings.language ?? "auto") : "auto"
+    readonly property bool wakeWord: settings ? (settings.wakeWord ?? true) : true
     property string activeLanguage: ""
+    property bool armed: false
 
     property string state: "idle"
     property string heard: ""
@@ -65,6 +67,10 @@ Item {
             svc.reply = e.text;
         } else if (e.ev === "activity") {
             svc.activity = e.text;
+        } else if (e.ev === "armed") {
+            svc.armed = e.on;
+        } else if (e.ev === "wake") {
+            svc.error = "";
         } else if (e.ev === "lang") {
             svc.activeLanguage = e.lang;
         } else if (e.ev === "error") {
@@ -74,6 +80,7 @@ Item {
 
     onSpeakRepliesChanged: command("speak " + (speakReplies ? "on" : "off"))
     onLanguageChanged: command("lang " + language)
+    onWakeWordChanged: command("wake " + (wakeWord ? "on" : "off"))
 
     Process {
         id: engine
@@ -88,9 +95,11 @@ Item {
             svc.online = true;
             svc.command("speak " + (svc.speakReplies ? "on" : "off"));
             svc.command("lang " + svc.language);
+            svc.command("wake " + (svc.wakeWord ? "on" : "off"));
         }
         onExited: {
             svc.online = false;
+            svc.armed = false;
             svc.state = "idle";
             restart.start();
         }

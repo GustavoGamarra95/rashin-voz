@@ -83,6 +83,13 @@
         ]
       },
       {
+        "key": "wakeWord",
+        "type": "toggle",
+        "label": "Escuchar «Hola Rashin» siempre",
+        "group": "Rashin Voz",
+        "default": true
+      },
+      {
         "key": "speakReplies",
         "type": "toggle",
         "label": "Leer las respuestas en voz alta",

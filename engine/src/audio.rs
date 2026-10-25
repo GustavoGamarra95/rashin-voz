@@ -36,7 +36,16 @@ impl Recording {
 }
 
 pub fn transcribe(path: &Path, lang: &str) -> Result<String, String> {
+    let result = transcribe_with(path, lang, None);
+    let _ = std::fs::remove_file(path);
+    result
+}
+
+pub fn transcribe_with(path: &Path, lang: &str, model: Option<&str>) -> Result<String, String> {
     let mut cmd = crate::child::command("voxtype");
+    if let Some(m) = model {
+        cmd.args(["--model", m]);
+    }
     if !lang.is_empty() && lang != "auto" {
         cmd.args(["--language", lang]);
     }
@@ -46,7 +55,6 @@ pub fn transcribe(path: &Path, lang: &str) -> Result<String, String> {
         .stderr(Stdio::null())
         .output()
         .map_err(|e| format!("no se pudo ejecutar voxtype: {e}"))?;
-    let _ = std::fs::remove_file(path);
     if !out.status.success() {
         return Err("voxtype no pudo transcribir el audio".into());
     }

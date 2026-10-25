@@ -26,6 +26,8 @@ hl.bind("SUPER + ALT + S", hl.dsp.exec_cmd("rashin-voz toggle"))
 
 ## Uso
 
+- Di «Hola Rashin» y tu petición, o solo «Hola Rashin» y espera el «¿Sí?». Tras cada respuesta tienes unos segundos para seguir hablando sin repetirlo. Se desactiva en QS Bar Settings > Community.
+
 - Clic en el micrófono de la barra: abre el panel.
 - Botón grande: empieza a escuchar; otra pulsación envía lo dicho.
 - Mientras habla, pulsar el botón la interrumpe.
@@ -34,6 +36,9 @@ hl.bind("SUPER + ALT + S", hl.dsp.exec_cmd("rashin-voz toggle"))
 - Ajuste en QS Bar Settings > Community: leer o no las respuestas en voz alta.
 
 ## Qué ejecuta, lee y escribe
+
+- Con «Hola Rashin» activado, el micrófono se escucha de forma continua y en local: solo los fragmentos con voz se transcriben con `voxtype` (modelo `base`) para buscar la frase; nada sale del equipo y los fragmentos se borran al instante.
+- La voz natural es Chatterbox (`bin/rashin-voz-tts`, Python con PyTorch); si no está disponible, se usa piper.
 
 - Ejecuta `rashin-voz serve` mientras el plugin está cargado. El motor lanza:
   - `pw-record` para grabar el micrófono (16 kHz, mono);

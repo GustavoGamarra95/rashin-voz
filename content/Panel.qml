@@ -25,7 +25,10 @@ Item {
         case "transcribing": return "Transcribiendo…";
         case "thinking": return root.service.activity.length > 0 ? "Rashin: " + root.service.activity : "Rashin está pensando…";
         case "speaking": return "Hablando… pulsa para interrumpir";
-        default: return "Pulsa el micrófono y habla";
+        default:
+            if (root.service.armed)
+                return "Te escucho…";
+            return root.service.wakeWord ? "Di «Hola Rashin» o pulsa el micrófono" : "Pulsa el micrófono y habla";
         }
     }
 

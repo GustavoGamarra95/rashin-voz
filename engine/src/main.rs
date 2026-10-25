@@ -3,6 +3,7 @@ mod chat;
 mod child;
 mod text;
 mod tts;
+mod wake;
 
 use audio::{Recording, Speech, Voice};
 use chat::{Chat, Frame};
@@ -13,14 +14,29 @@ use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::PathBuf;
 use std::sync::mpsc::{self, RecvTimeoutError, Sender};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tts::{NaturalVoice, TtsEvent};
+use wake::{Segment, Wake, WakeListener};
 
 enum Event {
     Cmd(String),
     Chat(Frame),
     Heard(Result<String, String>),
     Tts(TtsEvent),
+    Segment(Segment),
+    Woke(Woke),
+}
+
+enum Woke {
+    Nothing,
+    Alone,
+    Request(Result<String, String>),
+}
+
+impl From<Segment> for Event {
+    fn from(s: Segment) -> Self {
+        Event::Segment(s)
+    }
 }
 
 impl From<TtsEvent> for Event {
@@ -63,7 +79,9 @@ fn runtime_dir() -> PathBuf {
 }
 
 fn socket_path() -> PathBuf {
-    runtime_dir().join("rashin-voz.sock")
+    std::env::var_os("RASHIN_VOZ_SOCKET")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| runtime_dir().join("rashin-voz.sock"))
 }
 
 fn emit(value: serde_json::Value) {
@@ -128,14 +146,129 @@ struct Engine {
     natural: Option<NaturalVoice>,
     natural_ready: bool,
     lang: String,
+    wake: Option<WakeListener>,
+    checking: bool,
+    prompting: bool,
+    armed_until: Option<Instant>,
+    quiet_until: Option<Instant>,
+    segments: u64,
     tx: Sender<Event>,
 }
 
 impl Engine {
     fn set(&mut self, state: State) {
+        if self.state == State::Speaking && state != State::Speaking {
+            self.quiet_until = Some(Instant::now() + Duration::from_millis(500));
+            let follow = Duration::from_secs(if self.prompting { 8 } else { 6 });
+            self.prompting = false;
+            if self.wake.is_some() && state == State::Idle {
+                self.arm(Some(Instant::now() + follow));
+            }
+        }
         if self.state != state {
             self.state = state;
             emit(json!({"ev": "state", "state": state.name()}));
+        }
+    }
+
+    fn arm(&mut self, until: Option<Instant>) {
+        let was = self.armed_until.is_some();
+        self.armed_until = until;
+        if was != until.is_some() {
+            emit(json!({"ev": "armed", "on": until.is_some()}));
+        }
+    }
+
+    fn wake_on(&mut self, on: bool) {
+        if !on {
+            self.wake = None;
+            self.arm(None);
+            return;
+        }
+        if self.wake.is_some() {
+            return;
+        }
+        match WakeListener::start(self.tx.clone()) {
+            Ok(w) => self.wake = Some(w),
+            Err(e) => emit(json!({"ev": "error", "text": e})),
+        }
+    }
+
+    fn segment(&mut self, samples: Vec<i16>) {
+        if self.state != State::Idle || self.checking || self.recording.is_some() {
+            return;
+        }
+        self.segments += 1;
+        if std::env::var_os("RASHIN_VOZ_DEBUG").is_some() {
+            emit(json!({"ev": "debug", "segment": samples.len()}));
+        }
+        let path = runtime_dir().join(format!(
+            "rashin-voz-{}-seg{}.wav",
+            std::process::id(),
+            self.segments
+        ));
+        if wake::write_wav(&path, &samples).is_err() {
+            return;
+        }
+        let tx = self.tx.clone();
+        let lang = self.lang.clone();
+        if self.armed_until.is_some() {
+            self.arm(None);
+            self.set(State::Transcribing);
+            thread::spawn(move || {
+                let _ = tx.send(Event::Heard(audio::transcribe(&path, &lang)));
+            });
+            return;
+        }
+        self.checking = true;
+        thread::spawn(move || {
+            let quick = audio::transcribe_with(&path, &lang, Some("base")).unwrap_or_default();
+            if std::env::var_os("RASHIN_VOZ_DEBUG").is_some() {
+                emit(json!({"ev": "debug", "text": quick}));
+            }
+            let woke = match wake::detect(&quick) {
+                Wake::None => Woke::Nothing,
+                Wake::Alone => Woke::Alone,
+                Wake::WithRequest => Woke::Request(
+                    audio::transcribe_with(&path, &lang, None).map(|t| wake::strip(&t)),
+                ),
+            };
+            let _ = std::fs::remove_file(&path);
+            let _ = tx.send(Event::Woke(woke));
+        });
+    }
+
+    fn woke(&mut self, woke: Woke) {
+        self.checking = false;
+        if self.state != State::Idle {
+            return;
+        }
+        match woke {
+            Woke::Nothing => {}
+            Woke::Request(r) => {
+                emit(json!({"ev": "wake"}));
+                self.heard(r);
+            }
+            Woke::Alone => {
+                emit(json!({"ev": "wake"}));
+                let word = wake::prompt_word(&self.lang);
+                self.prompting = true;
+                if self.speak
+                    && self.natural_ready
+                    && let Some(n) = self.natural.as_mut()
+                    && n.say(word, &self.lang)
+                {
+                    return self.set(State::Speaking);
+                }
+                if self.speak
+                    && let Ok(s) = Speech::start(&self.voice, word)
+                {
+                    self.speech = Some(s);
+                    return self.set(State::Speaking);
+                }
+                self.prompting = false;
+                self.arm(Some(Instant::now() + Duration::from_secs(8)));
+            }
         }
     }
 
@@ -247,6 +380,7 @@ impl Engine {
                 emit(json!({"ev": "lang", "lang": self.lang}));
             }
             "say" => self.send(arg),
+            "wake" => self.wake_on(arg != "off"),
             "speak" => {
                 self.speak = arg != "off";
                 if !self.speak {
@@ -339,6 +473,18 @@ impl Engine {
             self.speech = None;
             self.set(State::Idle);
         }
+        let now = Instant::now();
+        if self.armed_until.is_some_and(|t| now >= t) {
+            self.arm(None);
+        }
+        if self.quiet_until.is_some_and(|t| now >= t) {
+            self.quiet_until = None;
+        }
+        let mute =
+            self.state != State::Idle || self.recording.is_some() || self.quiet_until.is_some();
+        if let Some(w) = self.wake.as_ref() {
+            w.mute(mute);
+        }
     }
 }
 
@@ -371,6 +517,12 @@ fn serve(tts_script: Option<String>) {
         natural: None,
         natural_ready: false,
         lang: tts::resolve_lang("auto"),
+        wake: None,
+        checking: false,
+        prompting: false,
+        armed_until: None,
+        quiet_until: None,
+        segments: 0,
         tx,
     };
     emit(json!({"ev": "state", "state": "idle"}));
@@ -393,6 +545,8 @@ fn serve(tts_script: Option<String>) {
             Ok(Event::Chat(f)) => engine.frame(f),
             Ok(Event::Heard(r)) => engine.heard(r),
             Ok(Event::Tts(e)) => engine.tts(e),
+            Ok(Event::Segment(Segment(s))) => engine.segment(s),
+            Ok(Event::Woke(w)) => engine.woke(w),
             Err(RecvTimeoutError::Timeout) => {}
             Err(RecvTimeoutError::Disconnected) => break,
         }
