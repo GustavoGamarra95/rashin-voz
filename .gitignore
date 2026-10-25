@@ -3,3 +3,4 @@
 *.tmp
 /target
 Cargo.lock.bak
+/.cargo/
