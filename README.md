@@ -1,56 +1,54 @@
 # Rashin Voz
 
-A Ryoku shell plugin (`rashin-voz`) scaffolded for the `topbarGlyph` host. The working
-demo is a counter that ticks once a second; edit it into your own plugin.
+Habla con Rashin por voz desde la barra de Ryoku. Pulsas el micrófono, hablas,
+vuelves a pulsar y Rashin te responde en pantalla y en voz alta. La conversación
+es la misma del chat de Rashin (Super+S), con el mismo agente e historial.
 
-## What it does
+## Piezas
 
-- **Service** (`service/Main.qml`): the logic, no UI. Holds the live state the
-  view reads through `pluginApi.mainInstance`.
-- **Widget** (`content/Widget.qml`): the one view every host mounts.
-- **Panel** (`content/Panel.qml`): present only in a `--bar` scaffold; the bar
-  opens it beneath the glyph.
+- `engine/`: el motor, en Rust (`rashin-voz`). Graba el micrófono, transcribe,
+  habla con Rashin y lee la respuesta.
+- `service/`, `content/`: el plugin de Quickshell. Un icono de micrófono en la
+  barra y un panel con el botón, el estado y la última respuesta.
 
-Ryoku ships four hosts: `topbarGlyph`, `desktopWidget`, `framePopout`, and
-`sidebarCard`. A sidebar card still uses `content/Widget.qml` plus
-`service/Main.qml`; it does not have a separate sidebar entry point. Its root
-`Item` exposes `s`, `open`, `reveal`, `tabActive`, `pluginApi`, and
-`requestClose()`. Ryoku owns its `width`, and the item reports only its
-`implicitHeight`.
+## Instalación
 
-## What it reads and writes
-
-The demo reads nothing off the machine and writes nothing. When you add real
-behaviour, keep to the rules in `AGENTS.md`: read settings through
-`pluginApi.pluginSettings` behind a default, write them only through
-`pluginApi.saveSetting(key, value)`, and write files only under
-`pluginApi.stateDir`. Every external command belongs in `bin/` or in
-`dependencies.commands`; every host you contact belongs in
-`capabilities.network`; a privileged action runs only through `pkexec` listed in
-`capabilities.privileged`.
-
-## Settings
-
-| key       | type   | default | description         |
-| --------- | ------ | ------- | ------------------- |
-| showCount | toggle | true    | Show the tick count |
-
-## Preview
-
-Capture a real screenshot of the widget and save it as
-`assets/preview-widget.png`, then list it under `files` in `manifest.json`. The
-store shows it in the catalogue.
-
-## Build, check, install
-
-```
-ryoku plugin validate .
-ryoku plugin add . --yes
+```sh
+cargo install --path engine --root ~/.local
+ryoku plugin add ~/Documentos/ryoku-plugins/rashin-voz --bar --yes
 ```
 
-Enable and place it under **Ryoku Settings > Add-ons**. A bar plugin can instead
-use `ryoku plugin add . --bar --yes` to enable it on the current bar immediately.
+Atajo opcional, en `~/.config/hypr/user.lua`:
 
-## Author
+```lua
+hl.bind("SUPER + ALT + R", hl.dsp.exec_cmd("rashin-voz toggle"))
+```
 
-Gustavo <gugaro8@gmail.com>: this plugin is community-made (`official` is false).
+## Uso
+
+- Clic en el micrófono de la barra: abre el panel.
+- Botón grande: empieza a escuchar; otra pulsación envía lo dicho.
+- Mientras habla, pulsar el botón la interrumpe.
+- `rashin-voz toggle|listen|stop|cancel|silence|say <texto>` controla el motor
+  en marcha desde un atajo o un script.
+- Ajuste en QS Bar Settings > Community: leer o no las respuestas en voz alta.
+
+## Qué ejecuta, lee y escribe
+
+- Ejecuta `rashin-voz serve` mientras el plugin está cargado. El motor lanza:
+  - `pw-record` para grabar el micrófono (16 kHz, mono);
+  - `voxtype transcribe` para pasar la voz a texto, en local;
+  - `ryoku-rashin chat --follow` para enviar el mensaje a Rashin y recibir la
+    respuesta;
+  - `piper` (voz local) y `pw-play` para leer la respuesta.
+- Lee la voz de piper de `~/.local/share/claude-tts/voices/es_MX-ald-medium.onnx`
+  (otra con `RASHIN_VOZ_VOICE`; otro binario de piper con `RASHIN_VOZ_PIPER`).
+- Escribe solo la grabación temporal `$XDG_RUNTIME_DIR/rashin-voz-<pid>.wav`
+  (se borra al transcribir) y el socket `$XDG_RUNTIME_DIR/rashin-voz.sock`.
+- No usa la red por su cuenta, no pide privilegios y no guarda secretos. Lo que
+  Rashin haga con el mensaje depende de su agente configurado.
+
+## Requisitos
+
+`pipewire` (`pw-record`, `pw-play`), `voxtype`, `ryoku-rashin`, `piper` y Rust
+para compilar el motor.

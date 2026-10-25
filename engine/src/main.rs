@@ -6,6 +6,7 @@ use audio::{Recording, Speech, Voice};
 use chat::{Chat, Frame};
 use serde_json::json;
 use std::io::{BufRead, BufReader, Write};
+use std::os::unix::fs::MetadataExt;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::PathBuf;
 use std::sync::mpsc::{self, RecvTimeoutError, Sender};
@@ -76,14 +77,18 @@ fn voice_from_env() -> Voice {
     Voice { piper, model }
 }
 
-fn listen_socket(tx: Sender<Event>) {
+fn socket_inode() -> Option<u64> {
+    std::fs::metadata(socket_path()).ok().map(|m| m.ino())
+}
+
+fn listen_socket(tx: Sender<Event>) -> Option<u64> {
     let path = socket_path();
     let _ = std::fs::remove_file(&path);
     let listener = match UnixListener::bind(&path) {
         Ok(l) => l,
         Err(e) => {
             emit(json!({"ev": "error", "text": format!("socket de control: {e}")}));
-            return;
+            return None;
         }
     };
     thread::spawn(move || {
@@ -96,6 +101,7 @@ fn listen_socket(tx: Sender<Event>) {
             }
         }
     });
+    socket_inode()
 }
 
 struct Engine {
@@ -291,7 +297,9 @@ impl Engine {
 
 fn serve() {
     let (tx, rx) = mpsc::channel();
-    listen_socket(tx.clone());
+    let socket_tx = tx.clone();
+    let mut socket = listen_socket(socket_tx.clone());
+    let mut ticks: u32 = 0;
     let stdin_tx = tx.clone();
     thread::spawn(move || {
         for line in std::io::stdin().lock().lines().map_while(Result::ok) {
@@ -327,12 +335,18 @@ fn serve() {
             Err(RecvTimeoutError::Disconnected) => break,
         }
         engine.tick();
+        ticks = ticks.wrapping_add(1);
+        if ticks.is_multiple_of(10) && socket_inode() != socket {
+            socket = listen_socket(socket_tx.clone());
+        }
     }
     engine.silence();
     if let Some(r) = engine.recording.take() {
         r.cancel();
     }
-    let _ = std::fs::remove_file(socket_path());
+    if socket.is_some() && socket_inode() == socket {
+        let _ = std::fs::remove_file(socket_path());
+    }
 }
 
 fn main() {

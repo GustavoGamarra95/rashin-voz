@@ -1,32 +1,98 @@
 pragma ComponentBehavior: Bound
 
 import QtQuick
+import Quickshell.Io
 
-// service/Main.qml is the plugin's logic: no UI. The host loads one instance and
-// hands it to every view as pluginApi.mainInstance, so the widget and the panel
-// read the same live state. Replace the demo counter below with your plugin's
-// real state and the singletons or bin/ scripts that feed it.
 Item {
     id: svc
 
-    // Set by the host after this loads; the plugin's settings live behind it.
-    // Read settings through pluginApi.pluginSettings, always behind a default,
-    // and write them only through pluginApi.saveSetting(key, value) (R5).
     property var pluginApi
     readonly property var settings: pluginApi ? pluginApi.pluginSettings : null
+    readonly property bool speakReplies: settings ? (settings.speakReplies ?? true) : true
 
-    // Demo state: a counter that ticks once a second.
-    property int count: 0
+    property string state: "idle"
+    property string heard: ""
+    property string reply: ""
+    property string activity: ""
+    property string error: ""
+    property bool online: false
 
-    // The panel's RESET button calls this.
-    function reset() {
-        svc.count = 0;
+    readonly property bool listening: state === "listening"
+    readonly property bool busy: state === "transcribing" || state === "thinking"
+    readonly property bool speaking: state === "speaking"
+
+    function command(line) {
+        if (engine.running)
+            engine.write(line + "\n");
+    }
+
+    function toggle() {
+        svc.error = "";
+        command("toggle");
+    }
+
+    function silence() {
+        command("silence");
+    }
+
+    function say(text) {
+        var t = String(text).trim();
+        if (t.length === 0 || svc.busy)
+            return;
+        svc.error = "";
+        svc.heard = t;
+        svc.reply = "";
+        command("say " + t.replace(/\n/g, " "));
+    }
+
+    function handle(line) {
+        var e;
+        try {
+            e = JSON.parse(String(line));
+        } catch (err) {
+            return;
+        }
+        if (e.ev === "state") {
+            svc.state = e.state;
+            if (e.state !== "thinking")
+                svc.activity = "";
+        } else if (e.ev === "heard") {
+            svc.heard = e.text;
+            svc.reply = "";
+        } else if (e.ev === "reply") {
+            svc.reply = e.text;
+        } else if (e.ev === "activity") {
+            svc.activity = e.text;
+        } else if (e.ev === "error") {
+            svc.error = e.text;
+        }
+    }
+
+    onSpeakRepliesChanged: command("speak " + (speakReplies ? "on" : "off"))
+
+    Process {
+        id: engine
+        command: ["rashin-voz", "serve"]
+        running: true
+        stdinEnabled: true
+        stdout: SplitParser {
+            splitMarker: "\n"
+            onRead: (line) => svc.handle(line)
+        }
+        onStarted: {
+            svc.online = true;
+            svc.command("speak " + (svc.speakReplies ? "on" : "off"));
+        }
+        onExited: {
+            svc.online = false;
+            svc.state = "idle";
+            restart.start();
+        }
     }
 
     Timer {
-        interval: 1000
-        running: true
-        repeat: true
-        onTriggered: svc.count += 1
+        id: restart
+        interval: 3000
+        onTriggered: engine.running = true
     }
 }

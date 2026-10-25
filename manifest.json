@@ -2,8 +2,8 @@
   "id": "rashin-voz",
   "name": "Rashin Voz",
   "version": "0.1.0",
-  "author": "Gustavo \u003cgugaro8@gmail.com\u003e",
-  "description": "Rashin Voz is a Ryoku shell plugin.",
+  "author": "Gustavo <gugaro8@gmail.com>",
+  "description": "Habla con Rashin por voz: micrófono en la barra, respuestas leídas en voz alta.",
   "license": "MIT",
   "official": false,
   "hosts": [
@@ -15,7 +15,7 @@
     "panel": "content/Panel.qml"
   },
   "panel": {
-    "width": 320
+    "width": 360
   },
   "files": [],
   "capabilities": {
@@ -29,14 +29,16 @@
     "label": "Rashin Voz"
   },
   "dependencies": {
-    "commands": []
+    "commands": [
+      "rashin-voz"
+    ]
   },
   "metadata": {
     "settings": [
       {
-        "key": "showCount",
+        "key": "speakReplies",
         "type": "toggle",
-        "label": "Show the tick count",
+        "label": "Leer las respuestas en voz alta",
         "group": "Rashin Voz",
         "default": true
       }
