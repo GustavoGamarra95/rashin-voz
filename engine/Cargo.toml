@@ -2,6 +2,9 @@
 name = "rashin-voz"
 version = "0.1.0"
 edition = "2024"
+license = "MIT"
+description = "Motor de Rashin Voz: habla con Rashin por voz desde Ryoku"
+repository = "https://github.com/GustavoGamarra95/rashin-voz"
 
 [dependencies]
 libc = "0.2.191"

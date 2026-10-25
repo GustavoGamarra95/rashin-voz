@@ -52,3 +52,7 @@ hl.bind("SUPER + ALT + S", hl.dsp.exec_cmd("rashin-voz toggle"))
 
 `pipewire` (`pw-record`, `pw-play`), `voxtype`, `ryoku-rashin`, `piper` y Rust
 para compilar el motor.
+
+## Licencia
+
+MIT. Ver [LICENSE](LICENSE).
