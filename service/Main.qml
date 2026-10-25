@@ -9,6 +9,8 @@ Item {
     property var pluginApi
     readonly property var settings: pluginApi ? pluginApi.pluginSettings : null
     readonly property bool speakReplies: settings ? (settings.speakReplies ?? true) : true
+    readonly property string language: settings ? (settings.language ?? "auto") : "auto"
+    property string activeLanguage: ""
 
     property string state: "idle"
     property string heard: ""
@@ -63,17 +65,20 @@ Item {
             svc.reply = e.text;
         } else if (e.ev === "activity") {
             svc.activity = e.text;
+        } else if (e.ev === "lang") {
+            svc.activeLanguage = e.lang;
         } else if (e.ev === "error") {
             svc.error = e.text;
         }
     }
 
     onSpeakRepliesChanged: command("speak " + (speakReplies ? "on" : "off"))
+    onLanguageChanged: command("lang " + language)
 
     Process {
         id: engine
-        command: ["rashin-voz", "serve"]
-        running: true
+        command: ["rashin-voz", "serve", "--tts", svc.pluginApi ? svc.pluginApi.pluginDir + "/bin/rashin-voz-tts" : ""]
+        running: !!svc.pluginApi
         stdinEnabled: true
         stdout: SplitParser {
             splitMarker: "\n"
@@ -82,6 +87,7 @@ Item {
         onStarted: {
             svc.online = true;
             svc.command("speak " + (svc.speakReplies ? "on" : "off"));
+            svc.command("lang " + svc.language);
         }
         onExited: {
             svc.online = false;
@@ -93,6 +99,6 @@ Item {
     Timer {
         id: restart
         interval: 3000
-        onTriggered: engine.running = true
+        onTriggered: engine.running = !!svc.pluginApi
     }
 }

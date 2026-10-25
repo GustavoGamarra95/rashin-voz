@@ -1,6 +1,8 @@
 mod audio;
 mod chat;
+mod child;
 mod text;
+mod tts;
 
 use audio::{Recording, Speech, Voice};
 use chat::{Chat, Frame};
@@ -12,11 +14,19 @@ use std::path::PathBuf;
 use std::sync::mpsc::{self, RecvTimeoutError, Sender};
 use std::thread;
 use std::time::Duration;
+use tts::{NaturalVoice, TtsEvent};
 
 enum Event {
     Cmd(String),
     Chat(Frame),
     Heard(Result<String, String>),
+    Tts(TtsEvent),
+}
+
+impl From<TtsEvent> for Event {
+    fn from(e: TtsEvent) -> Self {
+        Event::Tts(e)
+    }
 }
 
 impl From<Frame> for Event {
@@ -115,6 +125,9 @@ struct Engine {
     chat_ready: bool,
     speak: bool,
     voice: Voice,
+    natural: Option<NaturalVoice>,
+    natural_ready: bool,
+    lang: String,
     tx: Sender<Event>,
 }
 
@@ -134,6 +147,11 @@ impl Engine {
     fn silence(&mut self) {
         if let Some(s) = self.speech.take() {
             s.stop();
+        }
+        if self.state == State::Speaking
+            && let Some(n) = self.natural.as_mut()
+        {
+            n.stop();
         }
         if self.state == State::Speaking {
             self.set(State::Idle);
@@ -162,8 +180,9 @@ impl Engine {
         let path = rec.stop();
         self.set(State::Transcribing);
         let tx = self.tx.clone();
+        let lang = self.lang.clone();
         thread::spawn(move || {
-            let _ = tx.send(Event::Heard(audio::transcribe(&path)));
+            let _ = tx.send(Event::Heard(audio::transcribe(&path, &lang)));
         });
     }
 
@@ -223,6 +242,10 @@ impl Engine {
                 }
             }
             "silence" => self.silence(),
+            "lang" => {
+                self.lang = tts::resolve_lang(arg);
+                emit(json!({"ev": "lang", "lang": self.lang}));
+            }
             "say" => self.send(arg),
             "speak" => {
                 self.speak = arg != "off";
@@ -262,6 +285,12 @@ impl Engine {
                 if !self.speak || spoken.is_empty() {
                     return self.set(State::Idle);
                 }
+                if self.natural_ready
+                    && let Some(n) = self.natural.as_mut()
+                    && n.say(&spoken, &self.lang)
+                {
+                    return self.set(State::Speaking);
+                }
                 match Speech::start(&self.voice, &spoken) {
                     Ok(s) => {
                         self.speech = Some(s);
@@ -287,6 +316,24 @@ impl Engine {
         }
     }
 
+    fn tts(&mut self, event: TtsEvent) {
+        match event {
+            TtsEvent::Ready => self.natural_ready = true,
+            TtsEvent::Done if self.state == State::Speaking && self.speech.is_none() => {
+                self.set(State::Idle)
+            }
+            TtsEvent::Error(e) => emit(json!({"ev": "error", "text": e})),
+            TtsEvent::Closed => {
+                self.natural = None;
+                self.natural_ready = false;
+                if self.state == State::Speaking && self.speech.is_none() {
+                    self.set(State::Idle);
+                }
+            }
+            _ => {}
+        }
+    }
+
     fn tick(&mut self) {
         if self.speech.as_mut().is_some_and(Speech::finished) {
             self.speech = None;
@@ -295,7 +342,7 @@ impl Engine {
     }
 }
 
-fn serve() {
+fn serve(tts_script: Option<String>) {
     let (tx, rx) = mpsc::channel();
     let socket_tx = tx.clone();
     let mut socket = listen_socket(socket_tx.clone());
@@ -321,16 +368,31 @@ fn serve() {
         chat_ready: false,
         speak: true,
         voice: voice_from_env(),
+        natural: None,
+        natural_ready: false,
+        lang: tts::resolve_lang("auto"),
         tx,
     };
     emit(json!({"ev": "state", "state": "idle"}));
     engine.connect();
+    if let Some(script) = tts_script {
+        let home = std::env::var("HOME").unwrap_or_default();
+        let python = std::env::var("RASHIN_VOZ_TTS_PYTHON").unwrap_or_else(|_| {
+            format!("{home}/.local/share/claude-tts/chatterbox/venv/bin/python")
+        });
+        match NaturalVoice::start(&python, &script, engine.tx.clone()) {
+            Ok(n) => engine.natural = Some(n),
+            Err(e) => emit(json!({"ev": "error", "text": e})),
+        }
+    }
+    emit(json!({"ev": "lang", "lang": engine.lang}));
     loop {
         match rx.recv_timeout(Duration::from_millis(200)) {
             Ok(Event::Cmd(c)) if c == "quit" => break,
             Ok(Event::Cmd(c)) => engine.command(&c),
             Ok(Event::Chat(f)) => engine.frame(f),
             Ok(Event::Heard(r)) => engine.heard(r),
+            Ok(Event::Tts(e)) => engine.tts(e),
             Err(RecvTimeoutError::Timeout) => {}
             Err(RecvTimeoutError::Disconnected) => break,
         }
@@ -352,7 +414,12 @@ fn serve() {
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
-        Some("serve") => serve(),
+        Some("serve") => serve(
+            args.iter()
+                .position(|a| a == "--tts")
+                .and_then(|i| args.get(i + 1).cloned())
+                .or_else(|| std::env::var("RASHIN_VOZ_TTS").ok()),
+        ),
         Some(_) => {
             let line = args.join(" ");
             match UnixStream::connect(socket_path()) {

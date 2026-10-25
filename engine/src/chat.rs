@@ -1,6 +1,6 @@
 use serde_json::{Value, json};
 use std::io::{BufRead, BufReader, Write};
-use std::process::{Child, ChildStdin, Command, Stdio};
+use std::process::{Child, ChildStdin, Stdio};
 use std::sync::mpsc::Sender;
 use std::thread;
 
@@ -20,7 +20,7 @@ pub struct Chat {
 
 impl Chat {
     pub fn start<T: From<Frame> + Send + 'static>(tx: Sender<T>) -> Result<Self, String> {
-        let mut child = Command::new("ryoku-rashin")
+        let mut child = crate::child::command("ryoku-rashin")
             .args(["chat", "--follow"])
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())

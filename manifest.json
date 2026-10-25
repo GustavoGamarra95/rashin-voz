@@ -17,7 +17,9 @@
   "panel": {
     "width": 360
   },
-  "files": [],
+  "files": [
+    "bin/rashin-voz-tts"
+  ],
   "capabilities": {
     "densities": [
       "glyph",
@@ -35,6 +37,51 @@
   },
   "metadata": {
     "settings": [
+      {
+        "key": "language",
+        "type": "choice",
+        "label": "Idioma de la conversación",
+        "group": "Rashin Voz",
+        "default": "auto",
+        "options": [
+          {
+            "value": "auto",
+            "label": "Automático (idioma del sistema)"
+          },
+          {
+            "value": "es",
+            "label": "Español"
+          },
+          {
+            "value": "en",
+            "label": "English"
+          },
+          {
+            "value": "pt",
+            "label": "Português"
+          },
+          {
+            "value": "fr",
+            "label": "Français"
+          },
+          {
+            "value": "it",
+            "label": "Italiano"
+          },
+          {
+            "value": "de",
+            "label": "Deutsch"
+          },
+          {
+            "value": "ja",
+            "label": "日本語"
+          },
+          {
+            "value": "zh",
+            "label": "中文"
+          }
+        ]
+      },
       {
         "key": "speakReplies",
         "type": "toggle",

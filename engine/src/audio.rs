@@ -1,6 +1,6 @@
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, Stdio};
 
 pub struct Recording {
     child: Child,
@@ -9,7 +9,7 @@ pub struct Recording {
 
 impl Recording {
     pub fn start(path: &Path) -> Result<Self, String> {
-        let child = Command::new("pw-record")
+        let child = crate::child::command("pw-record")
             .args(["--rate", "16000", "--channels", "1", "--format", "s16"])
             .arg(path)
             .stdout(Stdio::null())
@@ -35,8 +35,12 @@ impl Recording {
     }
 }
 
-pub fn transcribe(path: &Path) -> Result<String, String> {
-    let out = Command::new("voxtype")
+pub fn transcribe(path: &Path, lang: &str) -> Result<String, String> {
+    let mut cmd = crate::child::command("voxtype");
+    if !lang.is_empty() && lang != "auto" {
+        cmd.args(["--language", lang]);
+    }
+    let out = cmd
         .arg("transcribe")
         .arg(path)
         .stderr(Stdio::null())
@@ -79,7 +83,7 @@ pub struct Speech {
 
 impl Speech {
     pub fn start(voice: &Voice, text: &str) -> Result<Self, String> {
-        let mut piper = Command::new(&voice.piper)
+        let mut piper = crate::child::command(&voice.piper)
             .args(["-m", &voice.model, "--output-raw"])
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -87,7 +91,7 @@ impl Speech {
             .spawn()
             .map_err(|e| format!("no se pudo ejecutar piper ({}): {e}", voice.piper))?;
         let pcm = piper.stdout.take().ok_or("piper sin salida")?;
-        let player = Command::new("pw-play")
+        let player = crate::child::command("pw-play")
             .args([
                 "--raw",
                 "--rate",

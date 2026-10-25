@@ -1,0 +1,120 @@
+#!/usr/bin/env python3
+import json
+import re
+import subprocess
+import sys
+import threading
+import warnings
+
+warnings.filterwarnings("ignore")
+
+LANGS = {"ar", "da", "de", "el", "en", "es", "fi", "fr", "he", "hi", "it", "ja", "ko", "ms",
+         "nl", "no", "pl", "pt", "ru", "sv", "sw", "tr", "zh"}
+
+
+def emit(**event):
+    sys.stdout.write(json.dumps(event) + "\n")
+    sys.stdout.flush()
+
+
+def sentences(text):
+    parts = re.split(r"(?<=[.!?¡¿…:;])\s+|\n+", text)
+    out, buf = [], ""
+    for p in (p.strip() for p in parts):
+        if not p:
+            continue
+        buf = f"{buf} {p}".strip()
+        if len(buf) >= 40:
+            out.append(buf)
+            buf = ""
+    if buf:
+        out.append(buf)
+    return out
+
+
+class Voice:
+    def __init__(self):
+        import torch
+        from chatterbox.mtl_tts import ChatterboxMultilingualTTS
+        self.torch = torch
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        self.model = ChatterboxMultilingualTTS.from_pretrained(device=device)
+        self.rate = self.model.sr
+        self.model.generate("Hola.", language_id="es")
+
+    def pcm(self, text, lang):
+        wav = self.model.generate(text, language_id=lang if lang in LANGS else "en")
+        return (wav.clamp(-1, 1) * 32767).to(self.torch.int16).cpu().numpy().tobytes()
+
+
+class Speaker:
+    def __init__(self, voice):
+        self.voice = voice
+        self.lock = threading.Lock()
+        self.serial = 0
+        self.player = None
+
+    def stop(self):
+        with self.lock:
+            self.serial += 1
+            if self.player and self.player.poll() is None:
+                self.player.kill()
+            self.player = None
+
+    def say(self, text, lang):
+        self.stop()
+        with self.lock:
+            serial = self.serial
+        threading.Thread(target=self._run, args=(serial, text, lang), daemon=True).start()
+
+    def _run(self, serial, text, lang):
+        player = subprocess.Popen(
+            ["pw-play", "--raw", "--rate", str(self.voice.rate), "--channels", "1", "--format", "s16", "-"],
+            stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        with self.lock:
+            if serial != self.serial:
+                player.kill()
+                return
+            self.player = player
+        try:
+            for chunk in sentences(text):
+                if serial != self.serial:
+                    return
+                data = self.voice.pcm(chunk, lang)
+                if serial != self.serial:
+                    return
+                player.stdin.write(data)
+                player.stdin.flush()
+            player.stdin.close()
+            player.wait()
+        except (BrokenPipeError, OSError):
+            return
+        except Exception as e:
+            emit(ev="error", text=f"voz: {e}")
+        if serial == self.serial:
+            emit(ev="done")
+
+
+def main():
+    try:
+        speaker = Speaker(Voice())
+    except Exception as e:
+        emit(ev="error", text=f"no se pudo cargar la voz: {e}")
+        return 1
+    emit(ev="ready")
+    for line in sys.stdin:
+        try:
+            req = json.loads(line)
+        except ValueError:
+            continue
+        if req.get("cmd") == "stop":
+            speaker.stop()
+        elif req.get("cmd") == "say":
+            speaker.say(str(req.get("text", "")), str(req.get("lang", "es")))
+    speaker.stop()
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

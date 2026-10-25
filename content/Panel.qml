@@ -40,7 +40,7 @@ Item {
         spacing: 12 * root.s
 
         MicroLabel {
-            label: "Rashin Voz"
+            label: root.service && root.service.activeLanguage.length > 0 ? "Rashin Voz · " + root.service.activeLanguage.toUpperCase() : "Rashin Voz"
             s: root.s
         }
 
